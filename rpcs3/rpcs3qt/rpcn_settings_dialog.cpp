@@ -1231,6 +1231,7 @@ rpcn_friends_dialog::rpcn_friends_dialog(QWidget* parent)
 
 			QMenu* context_menu = new QMenu();
 			QAction* send_friend_request_action = context_menu->addAction(tr("&Send Friend Request"));
+			QAction* remove_recent_player_action = context_menu->addAction(tr("&Remove Recent Player"));
 
 			connect(send_friend_request_action, &QAction::triggered, this, [this, str_sel_friend]()
 				{
@@ -1243,6 +1244,12 @@ rpcn_friends_dialog::rpcn_friends_dialog(QWidget* parent)
 					QString qstr_friend = QString::fromStdString(str_sel_friend);
 					add_update_list(m_lst_requests, qstr_friend, m_icon_request_sent, QVariant(false));
 					remove_list(m_lst_history, qstr_friend);
+				});
+
+			connect(remove_recent_player_action, &QAction::triggered, this, [this, str_sel_friend]()
+				{
+					QString qstr_player = QString::fromStdString(str_sel_friend);
+					remove_list(m_lst_history, qstr_player);
 				});
 
 			context_menu->exec(m_lst_history->viewport()->mapToGlobal(pos));
