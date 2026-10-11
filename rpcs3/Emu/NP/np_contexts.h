@@ -309,7 +309,16 @@ struct matching_ctx
 
 	// To keep track of which callback to use for sceNpMatchingGetRoomListWithoutGUI / sceNpMatchingGetRoomListGUI / sceNpMatchingGetRoomListLimitGUI
 	atomic_t<bool> get_room_limit_version = false;
+
+	// Set by AcceptInvitationGUI so the room join reports SCE_NP_MATCHING_GUI_EVENT_ACCEPT_INVITATION
+	atomic_t<bool> accepting_invitation = false;
 };
 s32 create_matching_context(vm::ptr<SceNpId> npid, vm::ptr<SceNpMatchingHandler> handler, vm::ptr<void> arg);
 shared_ptr<matching_ctx> get_matching_context(u32 ctx_id);
 bool destroy_matching_context(u32 ctx_id);
+
+namespace np
+{
+	std::pair<error_code, shared_ptr<matching_ctx>> gui_prelude(u32 ctx_id, vm::ptr<SceNpMatchingGUIHandler> handler, vm::ptr<void> arg);
+	void gui_epilog(const shared_ptr<matching_ctx>& ctx);
+}
