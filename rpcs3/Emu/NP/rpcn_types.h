@@ -72,6 +72,14 @@ namespace rpcn
 		UnlockTrophy,
 		SyncTrophies,
 		DeleteTrophies,
+		// Lobby commands, available since protocol version 34
+		GetLobbyInfoList = 0x0200,
+		JoinLobby,
+		LeaveLobby,
+		SetLobbyMemberDataInternal,
+		GetLobbyMemberDataInternalList,
+		SendLobbyChatMessage,
+		SendLobbyInvitation,
 	};
 
 	enum class NotificationType : u16
@@ -95,6 +103,11 @@ namespace rpcn
 		RoomOwnerChangedGUI,
 		UserKickedGUI,
 		QuickMatchCompleteGUI,
+		MemberJoinedLobby = 0x0200,
+		MemberLeftLobby,
+		UpdatedLobbyMemberDataInternal,
+		LobbyMessageReceived,
+		LobbyInvitationReceived,
 	};
 
 	enum class rpcn_state
