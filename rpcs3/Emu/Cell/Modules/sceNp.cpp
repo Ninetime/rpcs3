@@ -1491,9 +1491,9 @@ error_code sceNpBasicSendMessageAttachment(ppu_thread& ppu, vm::cptr<SceNpId> to
 	return sceNpBasicSendMessageGui(ppu, msg, containerId);
 }
 
-error_code recv_message_gui(ppu_thread& ppu, u16 mainType, u32 recvOptions);
+error_code recv_message_gui(u16 mainType, u32 recvOptions);
 
-error_code sceNpBasicRecvMessageAttachment(ppu_thread& ppu, sys_memory_container_t containerId)
+error_code sceNpBasicRecvMessageAttachment(sys_memory_container_t containerId)
 {
 	sceNp.warning("sceNpBasicRecvMessageAttachment(containerId=%d)", containerId);
 
@@ -1512,7 +1512,7 @@ error_code sceNpBasicRecvMessageAttachment(ppu_thread& ppu, sys_memory_container
 	const u16 main_type = SCE_NP_BASIC_MESSAGE_MAIN_TYPE_DATA_ATTACHMENT;
 	const u32 options = 0;
 
-	return recv_message_gui(ppu, main_type, options);
+	return recv_message_gui(main_type, options);
 }
 
 error_code sceNpBasicRecvMessageAttachmentLoad(SceNpBasicAttachmentDataId id, vm::ptr<void> buffer, vm::ptr<u32> size)
@@ -1568,7 +1568,7 @@ error_code sceNpBasicRecvMessageAttachmentLoad(SceNpBasicAttachmentDataId id, vm
 	return CELL_OK;
 }
 
-error_code sceNpBasicRecvMessageCustom(ppu_thread& ppu, u16 mainType, u32 recvOptions, sys_memory_container_t containerId)
+error_code sceNpBasicRecvMessageCustom(u16 mainType, u32 recvOptions, sys_memory_container_t containerId)
 {
 	sceNp.warning("sceNpBasicRecvMessageCustom(mainType=%d, recvOptions=%d, containerId=%d)", mainType, recvOptions, containerId);
 
@@ -1594,19 +1594,44 @@ error_code sceNpBasicRecvMessageCustom(ppu_thread& ppu, u16 mainType, u32 recvOp
 		return SCE_NP_BASIC_ERROR_INVALID_ARGUMENT;
 	}
 
-	return recv_message_gui(ppu, mainType, recvOptions);
+	return recv_message_gui(mainType, recvOptions);
 }
 
-error_code recv_message_gui(ppu_thread& ppu, u16 mainType, u32 recvOptions)
+struct np_recv_message_gui
+{
+	atomic_t<bool> busy = false;
+	std::unique_ptr<named_thread<std::function<void()>>> thread;
+};
+
+static void recv_message_gui_thread(u16 mainType, u32 recvOptions)
 {
 	auto& nph = g_fxo->get<named_thread<np::np_handler>>();
+
+	u32 event_to_send;
+	SceNpBasicAttachmentDataId data_id;
+
+	switch (mainType)
+	{
+	case SCE_NP_BASIC_MESSAGE_MAIN_TYPE_DATA_ATTACHMENT:
+		event_to_send = SCE_NP_BASIC_EVENT_RECV_ATTACHMENT_RESULT;
+		data_id = SCE_NP_BASIC_SELECTED_MESSAGE_DATA;
+		break;
+	case SCE_NP_BASIC_MESSAGE_MAIN_TYPE_INVITE:
+		event_to_send = SCE_NP_BASIC_EVENT_RECV_INVITATION_RESULT;
+		data_id = SCE_NP_BASIC_SELECTED_INVITATION_DATA;
+		break;
+	case SCE_NP_BASIC_MESSAGE_MAIN_TYPE_CUSTOM_DATA:
+		event_to_send = SCE_NP_BASIC_EVENT_RECV_CUSTOM_DATA_RESULT;
+		data_id = SCE_NP_BASIC_SELECTED_MESSAGE_DATA;
+		break;
+	default:
+		fmt::throw_exception("recv_message_gui: Unexpected main type %d", mainType);
+	}
 
 	error_code result = CELL_CANCEL;
 
 	SceNpBasicMessageRecvAction recv_result{};
 	u64 chosen_msg_id{};
-
-	ppu.state += cpu_flag::wait;
 
 	if (auto manager = g_fxo->try_get<rsx::overlays::display_manager>())
 	{
@@ -1626,9 +1651,17 @@ error_code recv_message_gui(ppu_thread& ppu, u16 mainType, u32 recvOptions)
 		input::SetIntercepted(false);
 	}
 
+	if (Emu.IsStopped())
+	{
+		return;
+	}
+
+	// The outcome is always reported through the basic handler, a cancellation included.
+	// Games wait for this event and do not expect an error from the initial call.
 	if (result != CELL_OK)
 	{
-		return not_an_error(SCE_NP_BASIC_ERROR_CANCEL);
+		nph.send_basic_event(event_to_send, SCE_NP_BASIC_ERROR_CANCEL, 0);
+		return;
 	}
 
 	const auto opt_msg = nph.get_message(chosen_msg_id);
@@ -1636,33 +1669,16 @@ error_code recv_message_gui(ppu_thread& ppu, u16 mainType, u32 recvOptions)
 	if (!opt_msg)
 	{
 		sceNp.fatal("sceNpBasicRecvMessageCustom: message is invalid: chosen_msg_id=%d", chosen_msg_id);
-		return SCE_NP_BASIC_ERROR_CANCEL;
+		nph.send_basic_event(event_to_send, SCE_NP_BASIC_ERROR_CANCEL, 0);
+		return;
 	}
 
 	const auto msg_pair = opt_msg.value();
 	const auto& msg     = msg_pair->second;
 
-	u32 event_to_send;
 	SceNpBasicAttachmentData data{};
+	data.id = data_id;
 	data.size = static_cast<u32>(msg.data.size());
-
-	switch (mainType)
-	{
-	case SCE_NP_BASIC_MESSAGE_MAIN_TYPE_DATA_ATTACHMENT:
-		event_to_send = SCE_NP_BASIC_EVENT_RECV_ATTACHMENT_RESULT;
-		data.id = SCE_NP_BASIC_SELECTED_MESSAGE_DATA;
-		break;
-	case SCE_NP_BASIC_MESSAGE_MAIN_TYPE_INVITE:
-		event_to_send = SCE_NP_BASIC_EVENT_RECV_INVITATION_RESULT;
-		data.id = SCE_NP_BASIC_SELECTED_INVITATION_DATA;
-		break;
-	case SCE_NP_BASIC_MESSAGE_MAIN_TYPE_CUSTOM_DATA:
-		event_to_send = SCE_NP_BASIC_EVENT_RECV_CUSTOM_DATA_RESULT;
-		data.id = SCE_NP_BASIC_SELECTED_MESSAGE_DATA;
-		break;
-	default:
-		fmt::throw_exception("recv_message_gui: Unexpected main type %d", mainType);
-	}
 
 	np::basic_event to_add{};
 	to_add.event = event_to_send;
@@ -1697,6 +1713,23 @@ error_code recv_message_gui(ppu_thread& ppu, u16 mainType, u32 recvOptions)
 
 	nph.queue_basic_event(to_add);
 	nph.send_basic_event(event_to_send, 0, 0);
+}
+
+error_code recv_message_gui(u16 mainType, u32 recvOptions)
+{
+	auto& gui = g_fxo->get<np_recv_message_gui>();
+
+	if (gui.busy.exchange(true))
+	{
+		return SCE_NP_BASIC_ERROR_BUSY;
+	}
+
+	// The dialog runs asynchronously, as on real hardware: blocking the calling thread stalls games that call this from a frame job
+	gui.thread = std::make_unique<named_thread<std::function<void()>>>("NP RecvMessage GUI", [mainType, recvOptions, &gui]()
+	{
+		recv_message_gui_thread(mainType, recvOptions);
+		gui.busy = false;
+	});
 
 	return CELL_OK;
 }
