@@ -4995,10 +4995,16 @@ error_code sceNpMatchingQuickMatchGUI(u32 ctx_id, vm::cptr<SceNpCommunicationId>
 	return nph.quickmatch_gui(ctx_id, communicationId, cond, available_num, timeout, handler, arg);
 }
 
+struct np_invitation_gui
+{
+	atomic_t<bool> busy = false;
+	std::unique_ptr<named_thread<std::function<void()>>> thread;
+};
+
 error_code sceNpMatchingSendInvitationGUI(u32 ctx_id, vm::cptr<SceNpRoomId> room_id, vm::cptr<SceNpCommunicationId> communicationId, vm::cptr<SceNpId> dsts, s32 num, s32 slot_type,
     vm::cptr<char> subject, vm::cptr<char> body, sys_memory_container_t container, vm::ptr<SceNpMatchingGUIHandler> handler, vm::ptr<void> arg)
 {
-	sceNp.todo("sceNpMatchingSendInvitationGUI(ctx_id=%d, room_id=*0x%x, communicationId=*0x%x, dsts=*0x%x, num=%d, slot_type=%d, subject=%s, body=%s, container=%d, handler=*0x%x, arg=*0x%x)", ctx_id,
+	sceNp.warning("sceNpMatchingSendInvitationGUI(ctx_id=%d, room_id=*0x%x, communicationId=*0x%x, dsts=*0x%x, num=%d, slot_type=%d, subject=%s, body=%s, container=%d, handler=*0x%x, arg=*0x%x)", ctx_id,
 	    room_id, communicationId, dsts, num, slot_type, subject, body, container, handler, arg);
 
 	auto& nph = g_fxo->get<named_thread<np::np_handler>>();
@@ -5029,23 +5035,77 @@ error_code sceNpMatchingSendInvitationGUI(u32 ctx_id, vm::cptr<SceNpRoomId> room
 	if (slot_type < SCE_NP_MATCHING_ROOM_SLOT_TYPE_PUBLIC || slot_type > SCE_NP_MATCHING_ROOM_SLOT_TYPE_PRIVATE)
 		return SCE_NP_MATCHING_ERROR_INVALID_ARG;
 
-	if (false) // TODO
+	auto& gui = g_fxo->get<np_invitation_gui>();
+
+	if (gui.busy.exchange(true))
 		return SCE_NP_MATCHING_ERROR_BUSY;
 
-	// TODO: set callback: handler + arg
+	const auto [prelude_err, ctx] = np::gui_prelude(ctx_id, handler, arg);
 
-	err = CELL_OK; // SendInvitation
-	if (err != CELL_OK && static_cast<u32>(err) != SCE_NP_MATCHING_ERROR_BUSY)
+	if (prelude_err)
 	{
-		// TODO ?
+		gui.busy = false;
+		return prelude_err;
 	}
 
-	return err;
+	// The invitation is a basic invite message carrying the room id, sent to a friend picked in the dialog
+	message_data msg_data = {
+		.commId = *communicationId,
+		.mainType = SCE_NP_BASIC_MESSAGE_MAIN_TYPE_INVITE,
+		.subType = SCE_NP_BASIC_MESSAGE_INVITE_SUBTYPE_ACTION_ACCEPT,
+		.subject = std::string(subject.get_ptr()),
+		.body = std::string(body.get_ptr())};
+	msg_data.data.assign(reinterpret_cast<const u8*>(room_id.get_ptr()), reinterpret_cast<const u8*>(room_id.get_ptr()) + sizeof(SceNpRoomId));
+
+	std::set<std::string> npids;
+
+	if (dsts)
+	{
+		for (s32 i = 0; i < num; i++)
+		{
+			npids.insert(np::npid_to_string(dsts[i]));
+		}
+	}
+
+	// The dialog runs asynchronously, as on real hardware: the game keeps rendering and waits for the GUI handler
+	gui.thread = std::make_unique<named_thread<std::function<void()>>>("NP SendInvitation GUI", [ctx, msg_data = std::move(msg_data), npids = std::move(npids), &gui]() mutable
+	{
+		error_code result = CELL_CANCEL;
+
+		if (auto manager = g_fxo->try_get<rsx::overlays::display_manager>())
+		{
+			auto send_dlg = manager->create<rsx::overlays::sendmessage_dialog>();
+			result = send_dlg->Exec(msg_data, npids);
+		}
+		else
+		{
+			input::SetIntercepted(true);
+
+			Emu.BlockingCallFromMainThread([&]()
+			{
+				auto send_dlg = g_emu_callbacks.get_sendmessage_dialog();
+				result = send_dlg->Exec(msg_data, npids);
+			});
+
+			input::SetIntercepted(false);
+		}
+
+		if (!Emu.IsStopped())
+		{
+			sceNp.notice("sceNpMatchingSendInvitationGUI: dialog result=0x%x", +result);
+			ctx->queue_gui_callback(SCE_NP_MATCHING_GUI_EVENT_SEND_INVITATION, result == CELL_OK ? 0 : +SCE_NP_MATCHING_ERROR_CANCELED);
+			np::gui_epilog(ctx);
+		}
+
+		gui.busy = false;
+	});
+
+	return CELL_OK;
 }
 
 error_code sceNpMatchingAcceptInvitationGUI(u32 ctx_id, vm::cptr<SceNpCommunicationId> communicationId, sys_memory_container_t container, vm::ptr<SceNpMatchingGUIHandler> handler, vm::ptr<void> arg)
 {
-	sceNp.todo("sceNpMatchingAcceptInvitationGUI(ctx_id=%d, communicationId=*0x%x, container=%d, handler=*0x%x, arg=*0x%x)", ctx_id, communicationId, container, handler, arg);
+	sceNp.warning("sceNpMatchingAcceptInvitationGUI(ctx_id=%d, communicationId=*0x%x, container=%d, handler=*0x%x, arg=*0x%x)", ctx_id, communicationId, container, handler, arg);
 
 	auto& nph = g_fxo->get<named_thread<np::np_handler>>();
 
@@ -5055,18 +5115,87 @@ error_code sceNpMatchingAcceptInvitationGUI(u32 ctx_id, vm::cptr<SceNpCommunicat
 	if (!communicationId || !handler)
 		return SCE_NP_MATCHING_ERROR_INVALID_ARG;
 
-	if (false) // TODO
+	auto& gui = g_fxo->get<np_invitation_gui>();
+
+	if (gui.busy.exchange(true))
 		return SCE_NP_MATCHING_ERROR_BUSY;
 
-	// TODO: set callback: handler + arg
+	const auto [prelude_err, ctx] = np::gui_prelude(ctx_id, handler, arg);
 
-	error_code err = CELL_OK; // AcceptInvitation
-	if (err != CELL_OK && static_cast<u32>(err) != SCE_NP_MATCHING_ERROR_BUSY)
+	if (prelude_err)
 	{
-		// TODO ?
+		gui.busy = false;
+		return prelude_err;
 	}
 
-	return err;
+	// The player picks a received invitation, then the room it carries is joined and reported as ACCEPT_INVITATION
+	gui.thread = std::make_unique<named_thread<std::function<void()>>>("NP AcceptInvitation GUI", [ctx, &gui]()
+	{
+		auto& nph = g_fxo->get<named_thread<np::np_handler>>();
+
+		error_code result = CELL_CANCEL;
+		SceNpBasicMessageRecvAction recv_result{};
+		u64 chosen_msg_id{};
+
+		if (auto manager = g_fxo->try_get<rsx::overlays::display_manager>())
+		{
+			auto recv_dlg = manager->create<rsx::overlays::recvmessage_dialog>();
+			result = recv_dlg->Exec(SCE_NP_BASIC_MESSAGE_MAIN_TYPE_INVITE, SCE_NP_BASIC_RECV_MESSAGE_OPTIONS_PRESERVE, recv_result, chosen_msg_id);
+		}
+		else
+		{
+			input::SetIntercepted(true);
+
+			Emu.BlockingCallFromMainThread([&]()
+			{
+				auto recv_dlg = g_emu_callbacks.get_recvmessage_dialog();
+				result = recv_dlg->Exec(SCE_NP_BASIC_MESSAGE_MAIN_TYPE_INVITE, SCE_NP_BASIC_RECV_MESSAGE_OPTIONS_PRESERVE, recv_result, chosen_msg_id);
+			});
+
+			input::SetIntercepted(false);
+		}
+
+		if (Emu.IsStopped())
+		{
+			gui.busy = false;
+			return;
+		}
+
+		std::optional<SceNpRoomId> room_id;
+
+		if (result == CELL_OK && recv_result == SCE_NP_BASIC_MESSAGE_ACTION_ACCEPT)
+		{
+			if (const auto opt_msg = nph.get_message(chosen_msg_id))
+			{
+				const auto& msg = opt_msg.value()->second;
+
+				if (msg.data.size() == sizeof(SceNpRoomId))
+				{
+					room_id.emplace();
+					std::memcpy(&room_id.value(), msg.data.data(), sizeof(SceNpRoomId));
+				}
+				else
+				{
+					sceNp.error("sceNpMatchingAcceptInvitationGUI: invitation %d carries %d bytes, not a room id", chosen_msg_id, msg.data.size());
+				}
+			}
+		}
+
+		if (room_id)
+		{
+			sceNp.notice("sceNpMatchingAcceptInvitationGUI: joining the invited room");
+			nph.join_room_accept_invitation_gui(ctx, *room_id);
+		}
+		else
+		{
+			ctx->queue_gui_callback(SCE_NP_MATCHING_GUI_EVENT_ACCEPT_INVITATION, SCE_NP_MATCHING_ERROR_CANCELED);
+			np::gui_epilog(ctx);
+		}
+
+		gui.busy = false;
+	});
+
+	return CELL_OK;
 }
 
 // FUN_00014d90

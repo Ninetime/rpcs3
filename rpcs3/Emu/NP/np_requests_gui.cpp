@@ -196,12 +196,25 @@ namespace np
 		return CELL_OK;
 	}
 
+	void np_handler::join_room_accept_invitation_gui(const shared_ptr<matching_ctx>& ctx, const SceNpRoomId& roomid)
+	{
+		// The context is already busy from AcceptInvitationGUI's prelude
+		ctx->accepting_invitation = true;
+
+		const u32 req_id = get_req_id(REQUEST_ID_HIGH::GUI);
+		add_gui_request(req_id, ctx->ctx_id);
+
+		get_rpcn()->join_room_gui(req_id, roomid);
+	}
+
 	void np_handler::reply_join_room_gui(u32 req_id, rpcn::ErrorType error, vec_stream& reply)
 	{
 		auto ctx = take_pending_gui_request(req_id);
 
 		if (!ctx)
 			return;
+
+		const s32 gui_event = ctx->accepting_invitation.exchange(false) ? SCE_NP_MATCHING_GUI_EVENT_ACCEPT_INVITATION : SCE_NP_MATCHING_GUI_EVENT_JOIN_ROOM;
 
 		s32 error_code = CELL_OK;
 
@@ -225,7 +238,7 @@ namespace np
 
 		if (error_code != 0)
 		{
-			ctx->queue_gui_callback(SCE_NP_MATCHING_GUI_EVENT_JOIN_ROOM, error_code);
+			ctx->queue_gui_callback(gui_event, error_code);
 			gui_epilog(ctx);
 			return;
 		}
@@ -247,8 +260,8 @@ namespace np
 			gui_cache.add_member(room_info->room_status.id, cur_member.get_ptr(), true);
 		}
 
-		set_gui_result(SCE_NP_MATCHING_GUI_EVENT_JOIN_ROOM, std::move(edata));
-		ctx->queue_gui_callback(SCE_NP_MATCHING_GUI_EVENT_JOIN_ROOM, 0);
+		set_gui_result(gui_event, std::move(edata));
+		ctx->queue_gui_callback(gui_event, 0);
 		gui_epilog(ctx);
 	}
 

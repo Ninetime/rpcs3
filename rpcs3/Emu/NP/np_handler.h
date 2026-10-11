@@ -196,6 +196,7 @@ namespace np
 		error_code get_result_gui(vm::ptr<void> buf, vm::ptr<u32> size, vm::ptr<s32> event);
 		error_code create_room_gui(u32 ctx_id, vm::cptr<SceNpCommunicationId> communicationId, vm::cptr<SceNpMatchingAttr> attr, vm::ptr<SceNpMatchingGUIHandler> handler, vm::ptr<void> arg);
 		error_code join_room_gui(u32 ctx_id, vm::ptr<SceNpRoomId> roomid, vm::ptr<SceNpMatchingGUIHandler> handler, vm::ptr<void> arg);
+		void join_room_accept_invitation_gui(const shared_ptr<matching_ctx>& ctx, const SceNpRoomId& roomid);
 		error_code leave_room_gui(u32 ctx_id, vm::cptr<SceNpRoomId> roomid);
 		error_code get_room_list_gui(u32 ctx_id, vm::cptr<SceNpCommunicationId> communicationId, vm::ptr<SceNpMatchingReqRange> range, vm::ptr<SceNpMatchingSearchCondition> cond, vm::ptr<SceNpMatchingAttr> attr, vm::ptr<SceNpMatchingGUIHandler> handler, vm::ptr<void> arg, bool limit);
 		error_code set_room_search_flag_gui(u32 ctx_id, vm::ptr<SceNpLobbyId> lobby_id, vm::ptr<SceNpRoomId> room_id, s32 flag);
