@@ -204,7 +204,18 @@ namespace np
 		const u32 req_id = get_req_id(REQUEST_ID_HIGH::GUI);
 		add_gui_request(req_id, ctx->ctx_id);
 
-		get_rpcn()->join_room_gui(req_id, roomid);
+		// AcceptInvitationGUI already returned to the game, a request that wasn't sent is reported through the handler or the game would wait forever
+		if (!get_rpcn()->join_room_gui(req_id, roomid))
+		{
+			rpcn_log.error("Failed to send the room join of an accepted invitation");
+
+			if (take_pending_gui_request(req_id))
+			{
+				ctx->accepting_invitation = false;
+				ctx->queue_gui_callback(SCE_NP_MATCHING_GUI_EVENT_ACCEPT_INVITATION, SCE_NP_MATCHING_ERROR_CANCELED);
+				gui_epilog(ctx);
+			}
+		}
 	}
 
 	void np_handler::reply_join_room_gui(u32 req_id, rpcn::ErrorType error, vec_stream& reply)
