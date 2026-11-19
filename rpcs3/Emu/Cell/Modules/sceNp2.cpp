@@ -1466,7 +1466,7 @@ error_code sceNpMatching2RegisterSignalingCallback(SceNpMatching2ContextId ctxId
 
 error_code sceNpMatching2ClearEventData(SceNpMatching2ContextId ctxId, SceNpMatching2EventKey eventKey)
 {
-	sceNp2.todo("sceNpMatching2ClearEventData(ctxId=%d, eventKey=%d)", ctxId, eventKey);
+	sceNp2.trace("sceNpMatching2ClearEventData(ctxId=%d, eventKey=%d)", ctxId, eventKey);
 
 	auto& nph = g_fxo->get<named_thread<np::np_handler>>();
 
@@ -1474,6 +1474,10 @@ error_code sceNpMatching2ClearEventData(SceNpMatching2ContextId ctxId, SceNpMatc
 	{
 		return SCE_NP_MATCHING2_ERROR_NOT_INITIALIZED;
 	}
+
+	// Releases event data the title chose not to retrieve with sceNpMatching2GetEventData.
+	// eventKey 0 (events without data) and already consumed keys are a no-op.
+	nph.clear_match2_event(eventKey);
 
 	return CELL_OK;
 }

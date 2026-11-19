@@ -207,6 +207,7 @@ namespace np
 		void leave_lobbies_of_context(SceNpMatching2ContextId ctx_id);
 
 		u32 get_match2_event(SceNpMatching2EventKey event_key, u32 dest_addr, u32 size);
+		void clear_match2_event(SceNpMatching2EventKey event_key);
 
 		// Old GUI Matching requests
 		error_code get_matching_result(u32 ctx_id, u32 req_id, vm::ptr<void> buf, vm::ptr<u32> size, vm::ptr<s32> event);

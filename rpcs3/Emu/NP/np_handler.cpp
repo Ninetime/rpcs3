@@ -1054,6 +1054,18 @@ namespace np
 		return size_copied;
 	}
 
+	void np_handler::clear_match2_event(SceNpMatching2EventKey event_key)
+	{
+		std::lock_guard lock(mutex_match2_req_results);
+
+		const auto it = match2_req_results.find(event_key);
+		if (it == match2_req_results.end())
+			return;
+
+		np_memory.free(it->second.addr());
+		match2_req_results.erase(it);
+	}
+
 	void np_handler::register_basic_handler(vm::cptr<SceNpCommunicationId> context, vm::ptr<SceNpBasicEventHandler> handler, vm::ptr<void> arg, bool context_sensitive)
 	{
 		{
